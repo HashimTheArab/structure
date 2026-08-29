@@ -3,13 +3,14 @@ package structure
 import (
 	"bufio"
 	"fmt"
-	"github.com/df-mc/dragonfly/server/world"
-	"github.com/df-mc/dragonfly/server/world/chunk"
-	"github.com/sandertv/gophertunnel/minecraft/nbt"
 	"go/ast"
 	"io"
 	"os"
 	"reflect"
+
+	"github.com/df-mc/dragonfly/server/world"
+	"github.com/df-mc/dragonfly/server/world/chunk"
+	"github.com/sandertv/gophertunnel/minecraft/nbt"
 )
 
 // Structure holds the data of an .mcstructure file. Structure implements the world.Structure interface. It
@@ -27,9 +28,9 @@ type diskStructure struct {
 }
 
 type diskStructureData struct {
-	BlockIndices []interface{}            `nbt:"block_indices"`
-	Entities     []map[string]interface{} `nbt:"entities"`
-	Palettes     map[string]palette       `nbt:"palette"`
+	BlockIndices []any              `nbt:"block_indices"`
+	Entities     []map[string]any   `nbt:"entities"`
+	Palettes     map[string]palette `nbt:"palette"`
 }
 
 // Read attempts to read a Structure from the io.Reader passed. If successful, the Structure returned is
@@ -39,7 +40,7 @@ type diskStructureData struct {
 func Read(r io.Reader) (Structure, error) {
 	disk := &diskStructure{}
 	if err := nbt.NewDecoderWithEncoding(r, nbt.LittleEndian).Decode(disk); err != nil {
-		return Structure{}, fmt.Errorf("decode structure: %v", err.Error())
+		return Structure{}, fmt.Errorf("decode structure: %w", err)
 	}
 	indices, err := decodeBlockIndices(disk.Structure.BlockIndices, disk.FormatVersion)
 	if err != nil {
@@ -116,8 +117,8 @@ func WriteFile(file string, s Structure) error {
 	return Write(w, s)
 }
 
-// New creates a new Structure and initialises it with air blocks. The Structure returned may be written to
-// using Structure.Set and Structure.SetAdditionalLiquid and the palette may be changed by using UsePalette.
+// New creates a new Structure and initialises it with air blocks. The Structure returned may be changed using
+// Structure.Set, and its palette may be changed using Structure.UsePalette.
 func New(dimensions [3]int) Structure {
 	front := make([]int32, dimensions[0]*dimensions[1]*dimensions[2])
 	liquids := make([]int32, dimensions[0]*dimensions[1]*dimensions[2])
@@ -157,7 +158,7 @@ func (s Structure) UsePalette(name string) {
 	if len(s.palette.BlockPalette) == 0 {
 		s.palette.BlockPalette = []block{{
 			Name:    "minecraft:air",
-			States:  map[string]interface{}{},
+			States:  map[string]any{},
 			Version: chunk.CurrentBlockVersion,
 		}}
 	}
@@ -175,7 +176,7 @@ func (s Structure) RotateRight() Structure {
 	return s.rotate(1)
 }
 
-// rotate returns a new structure with the same contents but rotated 90 degrees in the specificed direction.
+// rotate returns a new structure with the same contents but rotated 90 degrees in the specified direction.
 func (s Structure) rotate(direction int) Structure {
 	sizeX, sizeY, sizeZ := int(s.Size[0]), int(s.Size[1]), int(s.Size[2])
 	newStructure := New([3]int{sizeZ, sizeY, sizeX})

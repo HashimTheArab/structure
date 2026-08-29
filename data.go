@@ -2,12 +2,13 @@ package structure
 
 import (
 	"fmt"
-	"github.com/df-mc/dragonfly/server/world"
-	"github.com/df-mc/dragonfly/server/world/chunk"
-	"github.com/df-mc/worldupgrader/blockupgrader"
 	"reflect"
 	"strconv"
 	"unsafe"
+
+	"github.com/df-mc/dragonfly/server/world"
+	"github.com/df-mc/dragonfly/server/world/chunk"
+	"github.com/df-mc/worldupgrader/blockupgrader"
 )
 
 // structure is the outer wrapper of the structure. It holds the version of the structure, its dimensions,
@@ -171,7 +172,7 @@ func (s *structure) parsePaletteEntry(bl block) {
 
 // lookup looks up the world.Block passed in the palette of the structure. If not found, the value returned is
 // -1.
-func (s *structure) lookup(name string, properties map[string]interface{}) int32 {
+func (s *structure) lookup(name string, properties map[string]any) int32 {
 	for index, block := range s.palette.BlockPalette {
 		if block.Name == name {
 			allEqual := true
@@ -233,7 +234,7 @@ func (s *structure) check() error {
 }
 
 // decodeBlockIndices converts the version-specific NBT representation of block index layers to slices.
-func decodeBlockIndices(layers []interface{}, formatVersion int32) ([][]int32, error) {
+func decodeBlockIndices(layers []any, formatVersion int32) ([][]int32, error) {
 	if formatVersion == 1 && len(layers) != 2 {
 		return nil, fmt.Errorf("version 1 block_indices must contain 2 layers, got %v", len(layers))
 	}
@@ -267,7 +268,7 @@ func decodeBlockIndices(layers []interface{}, formatVersion int32) ([][]int32, e
 }
 
 // encodeBlockIndices converts block index layers to NBT int arrays and omits an unused extra layer.
-func encodeBlockIndices(indices [][]int32) ([]interface{}, error) {
+func encodeBlockIndices(indices [][]int32) ([]any, error) {
 	if len(indices) < 1 || len(indices) > 2 {
 		return nil, fmt.Errorf("block_indices must contain 1 or 2 layers, got %v", len(indices))
 	}
@@ -283,7 +284,7 @@ func encodeBlockIndices(indices [][]int32) ([]interface{}, error) {
 		}
 	}
 
-	layers := make([]interface{}, layerCount)
+	layers := make([]any, layerCount)
 	for i, indices := range indices[:layerCount] {
 		array := reflect.New(reflect.ArrayOf(len(indices), reflect.TypeOf(int32(0)))).Elem()
 		reflect.Copy(array, reflect.ValueOf(indices))
@@ -298,9 +299,9 @@ type structureData struct {
 	// the layer that these blocks are in. The int32s held are pointers to blocks in the palette used. Note
 	// that an index may be -1 to indicate that neither air nor any other block should be placed on this
 	// position.
-	BlockIndices [][]int32                `nbt:"block_indices"`
-	Entities     []map[string]interface{} `nbt:"entities"`
-	Palettes     map[string]palette       `nbt:"palette"`
+	BlockIndices [][]int32          `nbt:"block_indices"`
+	Entities     []map[string]any   `nbt:"entities"`
+	Palettes     map[string]palette `nbt:"palette"`
 }
 
 // palette represents the palette of a single structure.
@@ -312,13 +313,13 @@ type palette struct {
 // block represents a single block entry, holding a block name and its states. These entries also hold a
 // version.
 type block struct {
-	Name    string                 `nbt:"name"`
-	States  map[string]interface{} `nbt:"states"`
-	Version int32                  `nbt:"version"`
+	Name    string         `nbt:"name"`
+	States  map[string]any `nbt:"states"`
+	Version int32          `nbt:"version"`
 }
 
 // blockPositionData holds additional data associated with specific block positions in the structure. At the
 // moment, these appear to be limited to block entity data.
 type blockPositionData struct {
-	BlockEntityData map[string]interface{} `nbt:"block_entity_data"`
+	BlockEntityData map[string]any `nbt:"block_entity_data"`
 }
