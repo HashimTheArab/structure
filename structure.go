@@ -19,14 +19,41 @@ type Structure struct {
 	*structure
 }
 
+type diskStructure struct {
+	FormatVersion int32             `nbt:"format_version"`
+	Size          []int32           `nbt:"size"`
+	Origin        []int32           `nbt:"structure_world_origin"`
+	Structure     diskStructureData `nbt:"structure"`
+}
+
+type diskStructureData struct {
+	BlockIndices []interface{}            `nbt:"block_indices"`
+	Entities     []map[string]interface{} `nbt:"entities"`
+	Palettes     map[string]palette       `nbt:"palette"`
+}
+
 // Read attempts to read a Structure from the io.Reader passed. If successful, the Structure returned is
 // valid and the error is nil.
 // Read uses a palette name of 'default' by default. UsePalette may be used to change the name of the
 // palette to use.
 func Read(r io.Reader) (Structure, error) {
-	s := &structure{}
-	if err := nbt.NewDecoderWithEncoding(r, nbt.LittleEndian).Decode(s); err != nil {
+	disk := &diskStructure{}
+	if err := nbt.NewDecoderWithEncoding(r, nbt.LittleEndian).Decode(disk); err != nil {
 		return Structure{}, fmt.Errorf("decode structure: %v", err.Error())
+	}
+	indices, err := decodeBlockIndices(disk.Structure.BlockIndices, disk.FormatVersion)
+	if err != nil {
+		return Structure{}, fmt.Errorf("decode structure: %w", err)
+	}
+	s := &structure{
+		FormatVersion: disk.FormatVersion,
+		Size:          disk.Size,
+		Origin:        disk.Origin,
+		Structure: structureData{
+			BlockIndices: indices,
+			Entities:     disk.Structure.Entities,
+			Palettes:     disk.Structure.Palettes,
+		},
 	}
 	if err := s.check(); err != nil {
 		return Structure{}, fmt.Errorf("verify structure: %w", err)
@@ -53,8 +80,22 @@ func ReadFile(file string) (Structure, error) {
 // Write writes a Structure to the io.Writer passed. If successful, the error returned is nil.
 func Write(w io.Writer, s Structure) error {
 	s.Structure.Palettes[s.paletteName] = *s.palette
+	indices, err := encodeBlockIndices(s.Structure.BlockIndices)
+	if err != nil {
+		return fmt.Errorf("encode structure: %w", err)
+	}
+	disk := diskStructure{
+		FormatVersion: version,
+		Size:          s.Size,
+		Origin:        s.Origin,
+		Structure: diskStructureData{
+			BlockIndices: indices,
+			Entities:     s.Structure.Entities,
+			Palettes:     s.Structure.Palettes,
+		},
+	}
 
-	if err := nbt.NewEncoderWithEncoding(w, nbt.LittleEndian).Encode(s.structure); err != nil {
+	if err := nbt.NewEncoderWithEncoding(w, nbt.LittleEndian).Encode(disk); err != nil {
 		return fmt.Errorf("encode structure: %w", err)
 	}
 	return nil

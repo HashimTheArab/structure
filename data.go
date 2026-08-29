@@ -5,6 +5,7 @@ import (
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/df-mc/worldupgrader/blockupgrader"
+	"reflect"
 	"strconv"
 	"unsafe"
 )
@@ -33,7 +34,10 @@ type parsedBlock struct {
 	hasNBT bool
 }
 
-const version = 1
+const (
+	minimumVersion = 1
+	version        = 2
+)
 
 var (
 	// Check to ensure that *structure implements the world.Structure interface.
@@ -188,8 +192,8 @@ func (s *structure) lookup(name string, properties map[string]interface{}) int32
 // check verifies if the structure is valid. It returns an error if anything in the structure was found to be
 // incorrect.
 func (s *structure) check() error {
-	if s.FormatVersion != version {
-		return fmt.Errorf("unsupported format version %v: expected version %v", s.FormatVersion, version)
+	if s.FormatVersion < minimumVersion || s.FormatVersion > version {
+		return fmt.Errorf("unsupported format version %v: expected a version from %v through %v", s.FormatVersion, minimumVersion, version)
 	}
 	if l := len(s.Size); l != 3 {
 		return fmt.Errorf("structure size must have 3 values, but got %v (%v)", l, s.Size)
@@ -226,6 +230,66 @@ func (s *structure) check() error {
 		}
 	}
 	return nil
+}
+
+// decodeBlockIndices converts the version-specific NBT representation of block index layers to slices.
+func decodeBlockIndices(layers []interface{}, formatVersion int32) ([][]int32, error) {
+	if formatVersion == 1 && len(layers) != 2 {
+		return nil, fmt.Errorf("version 1 block_indices must contain 2 layers, got %v", len(layers))
+	}
+	if formatVersion == 2 && (len(layers) < 1 || len(layers) > 2) {
+		return nil, fmt.Errorf("version 2 block_indices must contain 1 or 2 layers, got %v", len(layers))
+	}
+
+	indices := make([][]int32, len(layers))
+	for i, layer := range layers {
+		value := reflect.ValueOf(layer)
+		if formatVersion == 1 && value.Kind() != reflect.Slice {
+			return nil, fmt.Errorf("version 1 block_indices layer %v must be a TAG_List", i)
+		}
+		if formatVersion == 2 && value.Kind() != reflect.Array {
+			return nil, fmt.Errorf("version 2 block_indices layer %v must be a TAG_IntArray", i)
+		}
+
+		indices[i] = make([]int32, value.Len())
+		for j := 0; j < value.Len(); j++ {
+			element := value.Index(j)
+			if element.Kind() == reflect.Interface {
+				element = element.Elem()
+			}
+			if element.Kind() != reflect.Int32 {
+				return nil, fmt.Errorf("block_indices layer %v element %v must be a TAG_Int", i, j)
+			}
+			indices[i][j] = int32(element.Int())
+		}
+	}
+	return indices, nil
+}
+
+// encodeBlockIndices converts block index layers to NBT int arrays and omits an unused extra layer.
+func encodeBlockIndices(indices [][]int32) ([]interface{}, error) {
+	if len(indices) < 1 || len(indices) > 2 {
+		return nil, fmt.Errorf("block_indices must contain 1 or 2 layers, got %v", len(indices))
+	}
+
+	layerCount := len(indices)
+	if layerCount == 2 {
+		layerCount = 1
+		for _, index := range indices[1] {
+			if index != -1 {
+				layerCount = 2
+				break
+			}
+		}
+	}
+
+	layers := make([]interface{}, layerCount)
+	for i, indices := range indices[:layerCount] {
+		array := reflect.New(reflect.ArrayOf(len(indices), reflect.TypeOf(int32(0)))).Elem()
+		reflect.Copy(array, reflect.ValueOf(indices))
+		layers[i] = array.Interface()
+	}
+	return layers, nil
 }
 
 // structureData holds the actual data of the structure. This includes both blocks and entities.
