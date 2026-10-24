@@ -85,9 +85,6 @@ func Read(r io.Reader) (Structure, error) {
 	if err := nbt.UnmarshalEncoding(buf.Bytes(), disk, nbt.LittleEndian); err != nil {
 		return Structure{}, fmt.Errorf("decode structure: %w", err)
 	}
-	if disk.FormatVersion < minimumVersion || disk.FormatVersion > version {
-		return Structure{}, fmt.Errorf("unsupported format version: %d", disk.FormatVersion)
-	}
 	data := &diskStructureData{}
 	if disk.Compression != 0 {
 		if disk.FormatVersion != 2 || disk.Compression != 1 {
