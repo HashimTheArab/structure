@@ -18,6 +18,7 @@ type structure struct {
 	Size          []int32       `nbt:"size"`
 	Origin        []int32       `nbt:"structure_world_origin"`
 	Structure     structureData `nbt:"structure"`
+	Compression   int32         `nbt:"compression,omitempty"`
 
 	palette       *palette
 	paletteName   string
