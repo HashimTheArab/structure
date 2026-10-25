@@ -18,6 +18,7 @@ type structure struct {
 	Size          []int32       `nbt:"size"`
 	Origin        []int32       `nbt:"structure_world_origin"`
 	Structure     structureData `nbt:"structure"`
+	Compression   int32         `nbt:"compression,omitempty"`
 
 	palette       *palette
 	paletteName   string
@@ -286,9 +287,7 @@ func encodeBlockIndices(indices [][]int32) ([]any, error) {
 
 	layers := make([]any, layerCount)
 	for i, indices := range indices[:layerCount] {
-		array := reflect.New(reflect.ArrayOf(len(indices), reflect.TypeOf(int32(0)))).Elem()
-		reflect.Copy(array, reflect.ValueOf(indices))
-		layers[i] = array.Interface()
+		layers[i] = makeArray(indices)
 	}
 	return layers, nil
 }
