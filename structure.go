@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"sync"
 
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
@@ -37,39 +36,15 @@ type diskStructureData struct {
 	Palettes     map[string]palette `nbt:"palette"`
 }
 
-var (
-	decompressor   io.ReadCloser
-	decompressorMu sync.Mutex
-)
-
 // decompress decompresses the given data using zlib. It is used for structures
 // with the compression tag set to 1.
 func decompress(b []byte) ([]byte, error) {
-	r := bytes.NewReader(b)
-
-	decompressorMu.Lock()
-	if decompressor == nil {
-		var err error
-		decompressor, err = zlib.NewReader(r)
-		if err != nil {
-			decompressorMu.Unlock()
-			return nil, fmt.Errorf("create decompressor: %w", err)
-		}
-	} else {
-		if err := decompressor.(zlib.Resetter).Reset(r, nil); err != nil {
-			decompressorMu.Unlock()
-			return nil, fmt.Errorf("reset decompressor: %w", err)
-		}
-	}
-	b, err := io.ReadAll(decompressor)
-	_ = decompressor.Close()
-	decompressorMu.Unlock()
-
+	r, err := zlib.NewReader(bytes.NewReader(b))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create decompressor: %w", err)
 	}
-
-	return b, nil
+	defer r.Close()
+	return io.ReadAll(r)
 }
 
 // Read attempts to read a Structure from the io.Reader passed. If successful, the Structure returned is
@@ -81,34 +56,33 @@ func Read(r io.Reader) (Structure, error) {
 	if err := nbt.NewDecoderWithEncoding(r, nbt.LittleEndian).Decode(disk); err != nil {
 		return Structure{}, fmt.Errorf("decode structure: %w", err)
 	}
-	data := &diskStructureData{}
+	var b []byte
+	var err error
 	if disk.Compression != 0 {
 		if disk.FormatVersion != 2 || disk.Compression != 1 {
 			return Structure{}, fmt.Errorf("unsupported compression %d for format version %d", disk.Compression, disk.FormatVersion)
 		}
-		b, ok := byteArray(disk.Structure)
+		compressed, ok := byteArray(disk.Structure)
 		if !ok {
 			return Structure{}, fmt.Errorf("structure tag must be a TAG_ByteArray, got %T", disk.Structure)
 		}
-		var err error
-		b, err = decompress(b)
+		b, err = decompress(compressed)
 		if err != nil {
 			return Structure{}, fmt.Errorf("decompress: %w", err)
-		}
-		if err := nbt.UnmarshalEncoding(b, data, nbt.LittleEndian); err != nil {
-			return Structure{}, fmt.Errorf("decode structure: %w", err)
 		}
 	} else {
 		if _, ok := disk.Structure.(map[string]any); !ok {
 			return Structure{}, fmt.Errorf("expected structure to be TAG_Compound, got %T", disk.Structure)
 		}
-		b, err := nbt.MarshalEncoding(disk.Structure, nbt.LittleEndian)
+		// NBT has no map-to-struct conversion, so reuse its encoder and decoder.
+		b, err = nbt.MarshalEncoding(disk.Structure, nbt.LittleEndian)
 		if err != nil {
 			return Structure{}, fmt.Errorf("encode structure: %w", err)
 		}
-		if err := nbt.UnmarshalEncoding(b, &data, nbt.LittleEndian); err != nil {
-			return Structure{}, fmt.Errorf("decode structure: %w", err)
-		}
+	}
+	var data diskStructureData
+	if err := nbt.UnmarshalEncoding(b, &data, nbt.LittleEndian); err != nil {
+		return Structure{}, fmt.Errorf("decode structure: %w", err)
 	}
 
 	indices, err := decodeBlockIndices(data.BlockIndices, disk.FormatVersion)
@@ -141,9 +115,9 @@ func byteArray(value any) ([]byte, bool) {
 	if !v.IsValid() || v.Kind() != reflect.Array || v.Type().Elem().Kind() != reflect.Uint8 {
 		return nil, false
 	}
-	slice := reflect.MakeSlice(reflect.SliceOf(v.Type().Elem()), v.Len(), v.Len())
-	reflect.Copy(slice, v)
-	return slice.Interface().([]byte), true
+	b := make([]byte, v.Len())
+	reflect.Copy(reflect.ValueOf(b), v)
+	return b, true
 }
 
 // ReadFile attempts to read a Structure from a file at the path passed. If successful, the error returned is
@@ -177,7 +151,7 @@ func Write(w io.Writer, s Structure) error {
 			Palettes:     s.Structure.Palettes,
 		},
 	}
-	if disk.Compression > 0 {
+	if disk.Compression != 0 {
 		if disk.Compression != 1 {
 			return fmt.Errorf("unsupported compression %d for format version %d", disk.Compression, disk.FormatVersion)
 		}
@@ -189,7 +163,7 @@ func Write(w io.Writer, s Structure) error {
 		if err != nil {
 			return fmt.Errorf("compress: %w", err)
 		}
-		disk.Structure = makeArray[uint8](b)
+		disk.Structure = makeArray(b)
 	}
 
 	if err := nbt.NewEncoderWithEncoding(w, nbt.LittleEndian).Encode(disk); err != nil {
@@ -205,27 +179,16 @@ func makeArray[E any](slice []E) any {
 	return array.Interface()
 }
 
-var (
-	compressor   *zlib.Writer
-	compressorMu sync.Mutex
-)
-
 // compress compresses the given data using zlib. It is used for structures
 // with the compression tag set to 1.
-func compress(b []byte) (_ []byte, err error) {
-	buf := &bytes.Buffer{}
-
-	compressorMu.Lock()
-	if compressor == nil {
-		compressor = zlib.NewWriter(buf)
-	} else {
-		compressor.Reset(buf)
+func compress(b []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	w := zlib.NewWriter(&buf)
+	if _, err := w.Write(b); err != nil {
+		_ = w.Close()
+		return nil, err
 	}
-	_, err = compressor.Write(b)
-	_ = compressor.Close()
-	compressorMu.Unlock()
-
-	if err != nil {
+	if err := w.Close(); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

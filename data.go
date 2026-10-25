@@ -287,9 +287,7 @@ func encodeBlockIndices(indices [][]int32) ([]any, error) {
 
 	layers := make([]any, layerCount)
 	for i, indices := range indices[:layerCount] {
-		array := reflect.New(reflect.ArrayOf(len(indices), reflect.TypeOf(int32(0)))).Elem()
-		reflect.Copy(array, reflect.ValueOf(indices))
-		layers[i] = array.Interface()
+		layers[i] = makeArray(indices)
 	}
 	return layers, nil
 }
