@@ -23,12 +23,12 @@ type Structure struct {
 	*structure
 }
 
-type diskStructure[S any] struct {
+type diskStructure struct {
 	FormatVersion int32   `nbt:"format_version"`
 	Compression   int32   `nbt:"compression,omitempty"`
 	Size          []int32 `nbt:"size"`
 	Origin        []int32 `nbt:"structure_world_origin"`
-	Structure     S       `nbt:"structure"`
+	Structure     any     `nbt:"structure"`
 }
 
 type diskStructureData struct {
@@ -77,12 +77,8 @@ func decompress(b []byte) ([]byte, error) {
 // Read uses a palette name of 'default' by default. UsePalette may be used to change the name of the
 // palette to use.
 func Read(r io.Reader) (Structure, error) {
-	buf := &bytes.Buffer{}
-	if _, err := buf.ReadFrom(r); err != nil {
-		return Structure{}, fmt.Errorf("read full: %w", err)
-	}
-	disk := &diskStructure[any]{}
-	if err := nbt.UnmarshalEncoding(buf.Bytes(), disk, nbt.LittleEndian); err != nil {
+	disk := &diskStructure{}
+	if err := nbt.NewDecoderWithEncoding(r, nbt.LittleEndian).Decode(disk); err != nil {
 		return Structure{}, fmt.Errorf("decode structure: %w", err)
 	}
 	data := &diskStructureData{}
@@ -103,7 +99,14 @@ func Read(r io.Reader) (Structure, error) {
 			return Structure{}, fmt.Errorf("decode structure: %w", err)
 		}
 	} else {
-		if err := nbt.NewDecoderWithEncoding(buf, nbt.LittleEndian).Decode(&diskStructure[*diskStructureData]{Structure: data}); err != nil {
+		if _, ok := disk.Structure.(map[string]any); !ok {
+			return Structure{}, fmt.Errorf("expected structure to be TAG_Compound, got %T", disk.Structure)
+		}
+		b, err := nbt.MarshalEncoding(disk.Structure, nbt.LittleEndian)
+		if err != nil {
+			return Structure{}, fmt.Errorf("encode structure: %w", err)
+		}
+		if err := nbt.UnmarshalEncoding(b, &data, nbt.LittleEndian); err != nil {
 			return Structure{}, fmt.Errorf("decode structure: %w", err)
 		}
 	}
@@ -163,7 +166,7 @@ func Write(w io.Writer, s Structure) error {
 	if err != nil {
 		return fmt.Errorf("encode structure: %w", err)
 	}
-	disk := diskStructure[any]{
+	disk := diskStructure{
 		FormatVersion: version,
 		Size:          s.Size,
 		Origin:        s.Origin,
